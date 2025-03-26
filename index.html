@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Path Connect Game</title>
+    <title>Switcharoo</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -22,9 +22,19 @@
             <button id="history-btn" title="Move History" disabled>
                 <img src="images/list-circle-outline.svg" alt="History">
             </button>
+            <div id="score-display">
+                <div class="score-item">
+                    <span class="player-label">A:</span>
+                    <span id="control-score-a">0</span>
+                </div>
+                <div class="score-item">
+                    <span class="player-label">B:</span>
+                    <span id="control-score-b">0</span>
+                </div>
+            </div>
         </div>
     </div>
-
+    
     <!-- Info Overlay -->
     <div id="info-overlay" class="overlay">
         <div class="overlay-content">

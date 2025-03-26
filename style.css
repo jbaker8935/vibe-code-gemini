@@ -35,7 +35,8 @@ body {
     max-height: 600px; /* Limit max board height */
     border: 2px solid #333;
     aspect-ratio: 4 / 8; /* 4 columns / 8 rows */
-    box-sizing: border-box; /* Explicitly add for safety */ /* <<<<<< ADDED LINE */
+    box-sizing: content-box; /* Changed from border-box to content-box */
+    position: relative;
 }
 
 .cell {
@@ -103,9 +104,12 @@ body {
     border-radius: 8px;
     width: 90%;
     max-width: 300px; /* Match board width roughly */
+    align-items: center; /* Added to align items vertically */
 }
 
 #controls button {
+    width: 40px; /* Fixed width */
+    height: 40px; /* Fixed height to maintain 1:1 ratio */
     background: #f8f8f8;
     border: 1px solid #ccc;
     border-radius: 50%;
@@ -219,6 +223,55 @@ body {
 #win-overlay .overlay-content {
     text-align: center;
 }
+
+/* Score Display */
+#score-display {
+    display: flex;
+    flex-direction: column;  
+    gap: 5px;
+    font-size: 0.9em;
+    min-width: 40px;
+    justify-content: center;
+    height: 40px; /* Match button height */
+}
+
+.score-item {
+    display: flex;
+    gap: 3px;
+    align-items: center;
+    justify-content: center;
+    line-height: 1.2; /* Adjusted for better vertical spacing */
+    height: 20px; /* Half of parent height for two items */
+}
+
+.move-counter {
+    position: absolute;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.7);
+    color: white;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+#game-board {
+    position: relative; /* Ensure move counter is positioned relative to board */
+}
+
+.score-display {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: rgba(0, 0, 0, 0.7);
+    color: white;
+    padding: 10px;
+    border-radius: 5px;
+    font-size: 14px;
+}
+
+
 
 /* --- Responsiveness --- */
 

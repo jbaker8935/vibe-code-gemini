@@ -23,10 +23,11 @@ document.addEventListener('DOMContentLoaded', () => {
     let selectedPiece = null; // { row, col }
     let legalMoves = []; // Array of { row, col }
     let moveHistory = []; // Array of { player, start, end, boardBefore }
-    let historicalBoardState = null; // Stores a board state when viewing history
     let gameOver = false;
     let winner = null;
     let winPath = []; // Stores cells [{row, col}] of the winning path
+    let playerAScore = 0;
+    let playerBScore = 0;
 
     // --- Initialization ---
 
@@ -36,7 +37,6 @@ document.addEventListener('DOMContentLoaded', () => {
         selectedPiece = null;
         legalMoves = [];
         moveHistory = [];
-        historicalBoardState = null;
         gameOver = false;
         winner = null;
         winPath = [];
@@ -56,6 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderBoard();
         updateStatusMessage(); // Optional: Indicate whose turn
         hideAllOverlays();
+        updateScoreDisplay();
         console.log("Game Initialized. Player A's turn (Bottom)."); // Updated log
     }
 
@@ -98,19 +99,48 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
 
-                // Highlight winning path if game is over
-                if (gameOver && winPath.some(pos => pos.row === r && pos.col === c)) {
-                     cell.classList.add('win-path');
+                // Only show win path if we're viewing the final position
+                if (winPath.length > 0 && (currentHistoryIndex === undefined || currentHistoryIndex === moveHistory.length)) {
+                    if (winPath.some(pos => pos.row === r && pos.col === c)) {
+                        cell.classList.add('win-path');
+                    }
                 }
-
 
                 cell.addEventListener('click', () => handleCellClick(r, c));
                 boardElement.appendChild(cell);
             }
         }
-        // Add game over class to board if needed
-         if (gameOver) {
+        
+        if (gameOver) {
             boardElement.classList.add('game-over');
+            // Always show move counter during history viewing
+            if (currentHistoryIndex !== undefined) {
+                const moveCount = document.createElement('div');
+                moveCount.classList.add('move-counter');
+                moveCount.textContent = currentHistoryIndex === undefined || currentHistoryIndex === moveHistory.length ? 
+                    'Final Position' : 
+                    `Move ${currentHistoryIndex} of ${moveHistory.length}`;
+                boardElement.appendChild(moveCount);
+            }
+
+            // Add score display
+            const scoreDisplay = document.createElement('div');
+            scoreDisplay.classList.add('score-display');
+            scoreDisplay.innerHTML = `
+                <div id="score-a">Player A: ${playerAScore}</div>
+                <div id="score-b">Player B: ${playerBScore}</div>
+            `;
+            boardElement.appendChild(scoreDisplay);
+
+            // Update the scores in the controls division
+            const controlScoreA = document.getElementById('control-score-a');
+            const controlScoreB = document.getElementById('control-score-b');
+            if (controlScoreA) controlScoreA.textContent = ` ${playerAScore}`;
+            if (controlScoreB) controlScoreB.textContent = ` ${playerBScore}`;
+        }
+
+        if (gameOver) {
+            updateMoveCounter();
         }
     }
 
@@ -130,13 +160,8 @@ document.addEventListener('DOMContentLoaded', () => {
      // (No changes needed in handleCellClick, resetBtn, infoBtn, historyBtn listeners,
      // overlayCloseButtons, or overlay backdrop listeners)
     function handleCellClick(row, col) {
-        if (gameOver && !historicalBoardState) return; // No moves after game ends (unless viewing history)
-        if (currentPlayer === PLAYER_B && !historicalBoardState) return; // Block human clicks during AI turn
-        if (historicalBoardState) { // If viewing history, any click restores final state
-            restoreFinalState();
-            return;
-        }
-
+        if (gameOver) return; // No moves after game ends (unless viewing history)
+        if (currentPlayer === PLAYER_B) return; // Block human clicks during AI turn
 
         const clickedCellPiece = board[row][col];
 
@@ -181,9 +206,6 @@ document.addEventListener('DOMContentLoaded', () => {
         button.addEventListener('click', () => {
              const overlayId = button.getAttribute('data-overlay');
              hideOverlay(document.getElementById(overlayId));
-             if (historicalBoardState) {
-                 restoreFinalState(); // Restore final state when closing history overlay
-             }
         });
     });
 
@@ -192,9 +214,6 @@ document.addEventListener('DOMContentLoaded', () => {
         overlay.addEventListener('click', (event) => {
             if (event.target === overlay) { // Check if click is on the backdrop itself
                 hideOverlay(overlay);
-                if (historicalBoardState) {
-                     restoreFinalState(); // Restore final state when closing history overlay
-                 }
             }
         });
     });
@@ -292,6 +311,8 @@ document.addEventListener('DOMContentLoaded', () => {
              return;
         }
 
+        // Store the state after the move
+        moveHistory[moveHistory.length - 1].boardAfter = JSON.parse(JSON.stringify(board));
 
         deselectPiece();
 
@@ -389,9 +410,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function handleWin(winningPlayer) {
          console.log(`Game Over! Player ${winningPlayer} wins!`);
+         // Update scores
+         if (winningPlayer === PLAYER_A) {
+             playerAScore++;
+         } else {
+             playerBScore++;
+         }
+         updateScoreDisplay();
+         
          winMessage.textContent = `Player ${winningPlayer} Wins!`;
          showOverlay(winOverlay);
          historyBtn.disabled = false; // Enable history button
+         currentHistoryIndex = moveHistory.length; // Initialize at final position
 
          // Auto-close win overlay after 5 seconds
          setTimeout(() => {
@@ -782,8 +812,10 @@ document.addEventListener('DOMContentLoaded', () => {
             moveDiv.textContent = `${moveNumber}. Player ${move.player}: ${startColDisplay}${startRowDisplay} -> ${endColDisplay}${endRowDisplay}`;
             moveDiv.addEventListener('click', () => {
                 // View state *before* this move was made
-                 viewHistoricalState(move.boardBefore); // Pass the correct board state
-                hideOverlay(historyOverlay);
+                 currentHistoryIndex = moveHistory.length - index - 1;
+                 renderBoard(move.boardAfter);
+                 updateMoveCounter();
+                 hideOverlay(historyOverlay);
             });
             historyList.appendChild(moveDiv);
         });
@@ -800,33 +832,73 @@ document.addEventListener('DOMContentLoaded', () => {
                       else if (r >= ROWS - 2) initialBoard[r][c] = { player: PLAYER_A, state: NORMAL }; // A bottom
                  }
              }
-             viewHistoricalState(initialBoard);
+             currentHistoryIndex = 0;
+             renderBoard(initialBoard);
+             updateMoveCounter();
              hideOverlay(historyOverlay);
          });
          historyList.appendChild(initialStateDiv); // Add initial state option at the end
     }
 
-     function viewHistoricalState(boardState) {
-         console.log("Viewing historical state...");
-         // Make sure to deep copy the historical board state
-         historicalBoardState = JSON.parse(JSON.stringify(boardState));
-         deselectPiece(); // Clear any current selection/highlights
-         gameOver = false; // Temporarily unset game over to remove win highlight during history view
-         renderBoard(historicalBoardState); // Render the historical board
-          // Disable interactions or indicate viewing mode (e.g., message, opacity)
-          boardElement.style.opacity = '0.7';
-          boardElement.style.cursor = 'pointer'; // Indicate clicking restores state
+     function navigateHistory(direction) {
+         if (!gameOver) return; // Exit if not in history mode
+         
+         if (currentHistoryIndex === undefined) {
+             currentHistoryIndex = moveHistory.length;
+         }
+         
+         const newIndex = Math.max(0, Math.min(moveHistory.length, currentHistoryIndex + direction));
+         if (newIndex === currentHistoryIndex) return; // No change needed
+         
+         currentHistoryIndex = newIndex;
+         
+         if (currentHistoryIndex === moveHistory.length) {
+             renderBoard(board);
+         } else if (currentHistoryIndex === 0) {
+             // Show initial board state
+             const initialBoard = Array(ROWS).fill(null).map(() => Array(COLS).fill(null));
+             for (let r = 0; r < ROWS; r++) {
+                 for (let c = 0; c < COLS; c++) {
+                     if (r < 2) initialBoard[r][c] = { player: PLAYER_B, state: NORMAL };
+                     else if (r >= ROWS - 2) initialBoard[r][c] = { player: PLAYER_A, state: NORMAL };
+                 }
+             }
+             renderBoard(initialBoard);
+         } else {
+             renderBoard(moveHistory[currentHistoryIndex - 1].boardAfter);
+         }
+         updateMoveCounter();
+     }
+
+     function updateMoveCounter() {
+         if (!gameOver) return;
+         
+         const counter = document.createElement('div');
+         counter.classList.add('move-counter');
+         counter.textContent = currentHistoryIndex === undefined || currentHistoryIndex === moveHistory.length ? 
+             'Final Position' : 
+             `Move ${currentHistoryIndex} of ${moveHistory.length}`;
+         
+         // Remove any existing counter
+         const existingCounter = boardElement.querySelector('.move-counter');
+         if (existingCounter) {
+             existingCounter.remove();
+         }
+         boardElement.appendChild(counter);
      }
 
      function restoreFinalState() {
-          console.log("Restoring final game state...");
-          historicalBoardState = null; // Clear historical view flag
-          gameOver = (winner !== null); // Restore game over status if there was a winner
-          deselectPiece();
-          renderBoard(board); // Re-render the actual final board
-          boardElement.style.opacity = '1';
-          boardElement.style.cursor = 'default'; // Restore default cursor
+         currentHistoryIndex = undefined;
+         boardElement.style.opacity = '1';
+         renderBoard(board);
      }
+
+     // Update board click handler for history mode
+     boardElement.addEventListener('click', () => {
+         if (currentHistoryIndex !== undefined) {
+             restoreFinalState();
+         }
+     });
 
     // --- Overlay Management ---
     // (showOverlay, hideOverlay, hideAllOverlays remain the same)
@@ -843,5 +915,78 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Start Game ---
     initGame();
+
+    let currentHistoryIndex = undefined;
+    let touchStartY = 0;
+
+    // Add scroll wheel handler
+    boardElement.addEventListener('wheel', (event) => {
+        if (!gameOver) return;
+        
+        event.preventDefault();
+        const direction = event.deltaY > 0 ? 1 : -1;
+        navigateHistory(direction);
+    });
+
+    // Add touch handlers for mobile
+    boardElement.addEventListener('touchstart', (event) => {
+        if (!gameOver) return;
+        touchStartY = event.touches[0].clientY;
+    });
+
+    boardElement.addEventListener('touchmove', (event) => {
+        if (!gameOver) return;
+        event.preventDefault();
+        
+        const touchEndY = event.touches[0].clientY;
+        const deltaY = touchEndY - touchStartY;
+        
+        if (Math.abs(deltaY) > 30) { // Minimum swipe distance
+            const direction = deltaY < 0 ? 1 : -1;
+            navigateHistory(direction);
+            touchStartY = touchEndY;
+        }
+    });
+
+    function navigateHistory(direction) {
+        if (currentHistoryIndex === undefined) {
+            currentHistoryIndex = moveHistory.length;
+        }
+        
+        currentHistoryIndex = Math.max(0, Math.min(moveHistory.length, currentHistoryIndex + direction));
+        
+        if (currentHistoryIndex === moveHistory.length) {
+            restoreFinalState();
+        } else if (currentHistoryIndex === 0) {
+            // Show initial board state
+            const initialBoard = Array(ROWS).fill(null).map(() => Array(COLS).fill(null));
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    if (r < 2) initialBoard[r][c] = { player: PLAYER_B, state: NORMAL };
+                    else if (r >= ROWS - 2) initialBoard[r][c] = { player: PLAYER_A, state: NORMAL };
+                }
+            }
+            renderBoard(initialBoard);
+        } else {
+            renderBoard(moveHistory[currentHistoryIndex - 1].boardAfter);
+        }
+        updateMoveCounter();
+    }
+
+    function updateScoreDisplay() {
+        // Update control scores
+        const controlScoreA = document.getElementById('control-score-a');
+        const controlScoreB = document.getElementById('control-score-b');
+        if (controlScoreA) controlScoreA.textContent = `${playerAScore}`;
+        if (controlScoreB) controlScoreB.textContent = `${playerBScore}`;
+
+        // Update game-over scores if present
+        const scoreA = document.getElementById('score-a');
+        const scoreB = document.getElementById('score-b');
+        if (scoreA && scoreB) {
+            scoreA.textContent = `Player A: ${playerAScore}`;
+            scoreB.textContent = `Player B: ${playerBScore}`;
+        }
+    }
 
 });
