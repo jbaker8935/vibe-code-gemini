@@ -5,11 +5,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const PLAYER_B = 'B'; // Black
     const NORMAL = 'normal';
     const SWAPPED = 'swapped';
+    let AI_DIFFICULTY = 'easy'; // Changed to let and default to 'easy'
 
     const boardElement = document.getElementById('game-board');
     const resetBtn = document.getElementById('reset-btn');
     const infoBtn = document.getElementById('info-btn');
     const historyBtn = document.getElementById('history-btn');
+    const difficultyBtn = document.getElementById('difficulty-btn'); // Add this line
     const infoOverlay = document.getElementById('info-overlay');
     const historyOverlay = document.getElementById('history-overlay');
     const winOverlay = document.getElementById('win-overlay');
@@ -17,6 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const winMessage = document.getElementById('win-message');
     const overlayCloseButtons = document.querySelectorAll('.close-overlay-btn');
     const overlays = document.querySelectorAll('.overlay');
+    const aiSpinnerOverlay = document.getElementById('ai-spinner-overlay');  // Add this line
 
     let board = []; // 2D array: null or { player: PLAYER_A/B, state: NORMAL/SWAPPED }
     let currentPlayer = PLAYER_A;
@@ -28,7 +31,24 @@ document.addEventListener('DOMContentLoaded', () => {
     let winPath = []; // Stores cells [{row, col}] of the winning path
     let playerAScore = 0;
     let playerBScore = 0;
+    let currentHistoryIndex = undefined;
+    let touchStartY = 0;
+    const transpositionTable = new Map();
 
+    var DEBUG = false; // Set to false to disable
+    var old_console_log = console.log;
+    console.log = function() {
+        if (DEBUG) {
+            old_console_log.apply(this, arguments);
+        }
+    };
+    var old_console_warn = console.warn;
+    console.warn = function() {
+        if (DEBUG) {
+            old_console_warn.apply(this, arguments);
+        }
+    };
+    // leave in console.error
     // --- Initialization ---
 
     function initGame() {
@@ -57,6 +77,7 @@ document.addEventListener('DOMContentLoaded', () => {
         updateStatusMessage(); // Optional: Indicate whose turn
         hideAllOverlays();
         updateScoreDisplay();
+        transpositionTable.clear();
         console.log("Game Initialized. Player A's turn (Bottom)."); // Updated log
     }
 
@@ -202,6 +223,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    // Add difficulty button handler
+    difficultyBtn.addEventListener('click', () => {
+        AI_DIFFICULTY = AI_DIFFICULTY === 'easy' ? 'hard' : 'easy';
+        difficultyBtn.classList.toggle('hard', AI_DIFFICULTY === 'hard');
+        const img = difficultyBtn.querySelector('img');
+        if (AI_DIFFICULTY === 'hard') {
+            img.src = 'images/play-forward-circle-outline.svg';
+            difficultyBtn.title = 'AI Difficulty: Hard';
+        } else {
+            img.src = 'images/play-circle-outline.svg';
+            difficultyBtn.title = 'AI Difficulty: Easy';
+        }
+        console.log(`AI Difficulty switched to: ${AI_DIFFICULTY}`);
+    });
+
     overlayCloseButtons.forEach(button => {
         button.addEventListener('click', () => {
              const overlayId = button.getAttribute('data-overlay');
@@ -283,7 +319,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Record state *before* the move for history
-        const boardBefore = JSON.parse(JSON.stringify(board));
+        const boardBefore = cloneBoard(board);
         moveHistory.push({
             player: currentPlayer,
             start: { row: startRow, col: startCol },
@@ -312,7 +348,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Store the state after the move
-        moveHistory[moveHistory.length - 1].boardAfter = JSON.parse(JSON.stringify(board));
+        moveHistory[moveHistory.length - 1].boardAfter = cloneBoard(board);
 
         deselectPiece();
 
@@ -432,32 +468,68 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- AI Opponent (Player B) ---
-    // (triggerAIMove remains the same)
+
     function triggerAIMove() {
         if (gameOver) return;
         console.log("AI (Player B) is thinking...");
 
-        const bestMove = findBestAIMove();
+        let spinnerTimeout;
+        let spinnerMinTimeout;
+        let spinnerShown = false;
 
-        if (bestMove) {
-            console.log("AI chooses move:", bestMove);
-            // Need to re-select the piece virtually for makeMove
-            selectPiece(bestMove.start.row, bestMove.start.col);
-            // Make sure the chosen end coords are in the recalculated legal moves
-            // This should always be true if findBestAIMove works correctly
-            if (legalMoves.some(m => m.row === bestMove.end.row && m.col === bestMove.end.col)) {
-                 makeMove(bestMove.start.row, bestMove.start.col, bestMove.end.row, bestMove.end.col);
+        // Show spinner after 3 seconds if AI is still thinking
+        spinnerTimeout = setTimeout(() => {
+            if (AI_DIFFICULTY === 'hard') {
+                showOverlay(aiSpinnerOverlay);
+                spinnerShown = true;
+                // Start minimum display timer when spinner is shown
+                spinnerMinTimeout = setTimeout(() => {
+                    spinnerMinTimeout = null;
+                }, 1000);
+            }
+        }, 3000);
+
+        // Use Promise to handle AI move computation
+        new Promise((resolve) => {
+            setTimeout(() => {
+                const bestMove = findBestAIMove();
+                resolve(bestMove);
+            }, 100);
+        }).then(bestMove => {
+            if (bestMove) {
+                console.log("AI chooses move:", bestMove);
+                selectPiece(bestMove.start.row, bestMove.start.col);
+                if (legalMoves.some(m => m.row === bestMove.end.row && m.col === bestMove.end.col)) {
+                    makeMove(bestMove.start.row, bestMove.start.col, bestMove.end.row, bestMove.end.col);
+                } else {
+                    console.error("AI Logic Error: Chosen move is not legal according to recalculation?");
+                    deselectPiece();
+                }
             } else {
-                console.error("AI Logic Error: Chosen move is not legal according to recalculation?");
-                // Fallback: Make *any* legal move? Or just log error.
-                // For now, just log. If this happens, the AI logic needs debugging.
-                deselectPiece(); // Clear selection state
+                console.log("AI has no legal moves!");
+            }
+            
+            // Clear the spinner timeout if it hasn't triggered yet
+            if (spinnerTimeout) {
+                clearTimeout(spinnerTimeout);
             }
 
-        } else {
-            console.log("AI has no legal moves! (Should not happen in this game?)");
-            // Handle stalemate? Or pass turn? For now, log it.
-        }
+            // If spinner was shown, wait for minimum display time before hiding
+            if (spinnerShown) {
+                const hideSpinner = () => {
+                    hideOverlay(aiSpinnerOverlay);
+                };
+
+                if (spinnerMinTimeout) {
+                    // If min display timer is still running, wait for it
+                    clearTimeout(spinnerMinTimeout);
+                    setTimeout(hideSpinner, 1000);
+                } else {
+                    // Min display time has already elapsed
+                    hideSpinner();
+                }
+            }
+        });
     }
 
     // (findBestAIMove simulation logic remains the same, but calls updated evaluateBoardState and allowsOpponentWin)
@@ -485,7 +557,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         for (const move of possibleMoves) {
             // Simulate the move
-            const tempBoard = JSON.parse(JSON.stringify(board));
+            const tempBoard = cloneBoard(board);
             const movingPiece = tempBoard[move.start.row][move.start.col];
             const targetPiece = tempBoard[move.end.row][move.end.col];
             let wasEmptyMove = false;
@@ -555,46 +627,127 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     // (allowsOpponentWin simulation logic remains the same, but calls updated checkWinConditionForState)
-     function allowsOpponentWin(boardState, opponentPlayer) {
-         // Check if opponentPlayer has any move that wins from boardState
-         for (let r = 0; r < ROWS; r++) {
-            for (let c = 0; c < COLS; c++) {
-                 if (boardState[r][c] && boardState[r][c].player === opponentPlayer) {
-                    const opponentMoves = calculateLegalMovesForState(boardState, r, c);
-                    for (const move of opponentMoves) {
-                         // Simulate opponent's move
-                         const nextBoardState = JSON.parse(JSON.stringify(boardState));
-                         const movingPiece = nextBoardState[r][c];
-                         const targetPiece = nextBoardState[move.row][move.col];
+     function allowsOpponentWin(boardState, opponentPlayer, depth = 3) {
+         if (depth <= 0) return false; // Stop recursion if too deep
+         
+         if (AI_DIFFICULTY === 'hard') {
+             // Get all Player A's possible moves
+             for (let r = 0; r < ROWS; r++) {
+                 for (let c = 0; c < COLS; c++) {
+                     if (boardState[r][c] && boardState[r][c].player === opponentPlayer) {
+                         const opponentMoves = calculateLegalMovesForState(boardState, r, c);
+                         for (const move of opponentMoves) {
+                             // Simulate Player A's move
+                             const afterOpponentMove = cloneBoard(boardState);
+                             const movingPiece = afterOpponentMove[r][c];
+                             const targetPiece = afterOpponentMove[move.row][move.col];
 
-                         if (targetPiece === null) {
-                              nextBoardState[move.row][move.col] = movingPiece;
-                              nextBoardState[r][c] = null;
-                              // Simulate unmarking (doesn't affect win check directly but good practice)
-                               for (let rr = 0; rr < ROWS; rr++) {
-                                   for (let cc = 0; cc < COLS; cc++) {
-                                        if (nextBoardState[rr][cc] && nextBoardState[rr][cc].state === SWAPPED) {
-                                             nextBoardState[rr][cc].state = NORMAL;
-                                        }
-                                   }
-                                }
-                         } else { // Swap
-                             nextBoardState[move.row][move.col] = { ...movingPiece, state: SWAPPED };
-                             nextBoardState[r][c] = { ...targetPiece, state: SWAPPED };
+                             // Apply Player A's move
+                             if (targetPiece === null) {
+                                 afterOpponentMove[move.row][move.col] = movingPiece;
+                                 afterOpponentMove[r][c] = null;
+                                 // Reset swapped pieces
+                                 for (let rr = 0; rr < ROWS; rr++) {
+                                     for (let cc = 0; cc < COLS; cc++) {
+                                         if (afterOpponentMove[rr][cc] && afterOpponentMove[rr][cc].state === SWAPPED) {
+                                             afterOpponentMove[rr][cc].state = NORMAL;
+                                         }
+                                     }
+                                 }
+                             } else {
+                                 afterOpponentMove[move.row][move.col] = { ...movingPiece, state: SWAPPED };
+                                 afterOpponentMove[r][c] = { ...targetPiece, state: SWAPPED };
+                             }
+
+                             // If Player A wins directly after their move
+                             if (checkWinConditionForState(afterOpponentMove, opponentPlayer).win) {
+                                 return true;
+                             }
+
+                             // Get all of Player B's possible responses
+                             let playerBHasValidResponse = false;
+                             for (let br = 0; br < ROWS && !playerBHasValidResponse; br++) {
+                                 for (let bc = 0; bc < COLS && !playerBHasValidResponse; bc++) {
+                                     if (afterOpponentMove[br][bc] && afterOpponentMove[br][bc].player === PLAYER_B) {
+                                         const playerBMoves = calculateLegalMovesForState(afterOpponentMove, br, bc);
+                                         for (const bMove of playerBMoves) {
+                                             const afterPlayerBMove = cloneBoard(afterOpponentMove);
+                                             const bMovingPiece = afterPlayerBMove[br][bc];
+                                             const bTargetPiece = afterPlayerBMove[bMove.row][bMove.col];
+
+                                             // Apply Player B's response move
+                                             if (bTargetPiece === null) {
+                                                 afterPlayerBMove[bMove.row][bMove.col] = bMovingPiece;
+                                                 afterPlayerBMove[br][bc] = null;
+                                                 // Reset swapped pieces
+                                                 for (let rr = 0; rr < ROWS; rr++) {
+                                                     for (let cc = 0; cc < COLS; cc++) {
+                                                         if (afterPlayerBMove[rr][cc] && afterPlayerBMove[rr][cc].state === SWAPPED) {
+                                                             afterPlayerBMove[rr][cc].state = NORMAL;
+                                                         }
+                                                     }
+                                                 }
+                                             } else {
+                                                 afterPlayerBMove[bMove.row][bMove.col] = { ...bMovingPiece, state: SWAPPED };
+                                                 afterPlayerBMove[br][bc] = { ...bTargetPiece, state: SWAPPED };
+                                             }
+
+                                             // If this response prevents Player A from winning next move
+                                             if (!checkWinConditionForState(afterPlayerBMove, opponentPlayer).win &&
+                                                 !allowsOpponentWin(afterPlayerBMove, opponentPlayer, depth - 1)) {
+                                                 playerBHasValidResponse = true;
+                                                 break;
+                                             }
+                                         }
+                                     }
+                                 }
+                             }
+                             
+                             // If no valid response was found for this Player A move
+                             if (!playerBHasValidResponse) {
+                                 return true;
+                             }
                          }
-
-
-                         // Check if this simulated move results in a win for the opponent
-                         if (checkWinConditionForState(nextBoardState, opponentPlayer).win) { // << Uses updated checkWinConditionForState
-                              return true; // Found a winning move for the opponent
-                         }
-                    }
+                     }
                  }
-            }
-         }
-         return false; // No immediate winning move found for the opponent
-     }
+             }
+             return false;
+         } else {
+             // Original easier logic - just check immediate wins
+             for (let r = 0; r < ROWS; r++) {
+                 for (let c = 0; c < COLS; c++) {
+                     if (boardState[r][c] && boardState[r][c].player === opponentPlayer) {
+                         const opponentMoves = calculateLegalMovesForState(boardState, r, c);
+                         for (const move of opponentMoves) {
+                             const nextBoardState = cloneBoard(boardState);
+                             const movingPiece = nextBoardState[r][c];
+                             const targetPiece = nextBoardState[move.row][move.col];
 
+                             if (targetPiece === null) {
+                                 nextBoardState[move.row][move.col] = movingPiece;
+                                 nextBoardState[r][c] = null;
+                                 for (let rr = 0; rr < ROWS; rr++) {
+                                     for (let cc = 0; cc < COLS; cc++) {
+                                         if (nextBoardState[rr][cc] && nextBoardState[rr][cc].state === SWAPPED) {
+                                             nextBoardState[rr][cc].state = NORMAL;
+                                         }
+                                     }
+                                 }
+                             } else {
+                                 nextBoardState[move.row][move.col] = { ...movingPiece, state: SWAPPED };
+                                 nextBoardState[r][c] = { ...targetPiece, state: SWAPPED };
+                             }
+
+                             if (checkWinConditionForState(nextBoardState, opponentPlayer).win) {
+                                 return true;
+                             }
+                         }
+                     }
+                 }
+             }
+         }
+         return false;
+     }
 
     // (calculateLegalMovesForState remains the same)
     function calculateLegalMovesForState(boardState, r, c) {
@@ -916,9 +1069,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Start Game ---
     initGame();
 
-    let currentHistoryIndex = undefined;
-    let touchStartY = 0;
-
     // Add scroll wheel handler
     boardElement.addEventListener('wheel', (event) => {
         if (!gameOver) return;
@@ -987,6 +1137,155 @@ document.addEventListener('DOMContentLoaded', () => {
             scoreA.textContent = `Player A: ${playerAScore}`;
             scoreB.textContent = `Player B: ${playerBScore}`;
         }
+    }
+
+    // Utility to deep clone boardState
+    function cloneBoard(boardState) {
+        // Use structuredClone if available (modern browsers), else fallback to JSON method
+        return (typeof structuredClone === 'function') ? 
+               structuredClone(boardState) :
+               JSON.parse(JSON.stringify(boardState));
+    }
+
+    function boardToKey(boardState) {
+        return boardState.map(row => 
+            row.map(cell => 
+                cell ? `${cell.player}${cell.state}` : '-'
+            ).join('')
+        ).join('|');
+    }
+
+    function hasValidResponse(boardState, opponentPlayer, depth, alpha, beta) {
+        const currentPlayer = opponentPlayer === PLAYER_A ? PLAYER_B : PLAYER_A;
+        let hasResponse = false;
+
+        // Quick check for blocking moves first
+        for (let r = 0; r < ROWS && !hasResponse; r++) {
+            for (let c = 0; c < COLS && !hasResponse; c++) {
+                if (boardState[r][c]?.player === currentPlayer) {
+                    const moves = calculateLegalMovesForState(boardState, r, c);
+                    for (const move of moves) {
+                        const nextState = Object.create(Object.getPrototypeOf(boardState));
+                        Object.assign(nextState, boardState);
+                        // Apply move...
+                        if (!allowsOpponentWin(nextState, opponentPlayer, depth - 1, -beta, -alpha)) {
+                            hasResponse = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        
+        return hasResponse;
+    }
+
+    function boardToKey(boardState) {
+        return boardState.map(row => 
+            row.map(cell => 
+                cell ? `${cell.player}${cell.state}` : '-'
+            ).join('')
+        ).join('|');
+    }
+
+    function allowsOpponentWin(boardState, opponentPlayer, depth = 3, alpha = -Infinity, beta = Infinity) {
+        if (depth <= 0) return false;
+
+        // Early exit - check immediate win
+        if (checkWinConditionForState(boardState, opponentPlayer).win) {
+            return true;
+        }
+
+        // Check transposition table
+        const boardKey = boardToKey(boardState);
+        if (transpositionTable.has(boardKey)) {
+            return transpositionTable.get(boardKey);
+        }
+
+        if (AI_DIFFICULTY === 'hard') {
+            // Get and sort moves by potential
+            let opponentMoves = [];
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    if (boardState[r][c]?.player === opponentPlayer) {
+                        const moves = calculateLegalMovesForState(boardState, r, c);
+                        moves.forEach(move => 
+                            opponentMoves.push({start: {row: r, col: c}, end: move})
+                        );
+                    }
+                }
+            }
+
+            // Sort moves - prioritize moves toward opponent's goal
+            opponentMoves.sort((a, b) => {
+                const targetRow = opponentPlayer === PLAYER_A ? 1 : ROWS - 2;
+                return Math.abs(targetRow - a.end.row) - Math.abs(targetRow - b.end.row);
+            });
+
+            for (const move of opponentMoves) {
+                const {start, end} = move;
+                // Use Object.create for faster cloning of similar boards
+                const afterOpponentMove = Object.create(Object.getPrototypeOf(boardState));
+                Object.assign(afterOpponentMove, boardState);
+                
+                // Apply move
+                const movingPiece = afterOpponentMove[start.row][start.col];
+                const targetPiece = afterOpponentMove[end.row][end.col];
+
+                if (!targetPiece) {
+                    afterOpponentMove[end.row][end.col] = movingPiece;
+                    afterOpponentMove[start.row][start.col] = null;
+                    // Reset swapped pieces using more efficient method
+                    for (const row of afterOpponentMove) {
+                        for (const cell of row) {
+                            if (cell?.state === SWAPPED) cell.state = NORMAL;
+                        }
+                    }
+                } else {
+                    afterOpponentMove[end.row][end.col] = { ...movingPiece, state: SWAPPED };
+                    afterOpponentMove[start.row][start.col] = { ...targetPiece, state: SWAPPED };
+                }
+
+                // Check if this leads to a win
+                if (checkWinConditionForState(afterOpponentMove, opponentPlayer).win ||
+                    !hasValidResponse(afterOpponentMove, opponentPlayer, depth - 1, alpha, beta)) {
+                    transpositionTable.set(boardKey, true);
+                    return true;
+                }
+
+                // Alpha-beta pruning
+                alpha = Math.max(alpha, -beta);
+                if (alpha >= beta) break;
+            }
+        }
+        
+        transpositionTable.set(boardKey, false);
+        return false;
+    }
+
+    function hasValidResponse(boardState, opponentPlayer, depth, alpha, beta) {
+        const currentPlayer = opponentPlayer === PLAYER_A ? PLAYER_B : PLAYER_A;
+        let hasResponse = false;
+
+        // Quick check for blocking moves first
+        for (let r = 0; r < ROWS && !hasResponse; r++) {
+            for (let c = 0; c < COLS && !hasResponse; c++) {
+                if (boardState[r][c]?.player === currentPlayer) {
+                    const moves = calculateLegalMovesForState(boardState, r, c);
+                    for (const move of moves) {
+                        const nextState = Object.create(Object.getPrototypeOf(boardState));
+                        Object.assign(nextState, boardState);
+                        // Apply move...
+                        if (!allowsOpponentWin(nextState, opponentPlayer, depth - 1, -beta, -alpha)) {
+                            hasResponse = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        
+        return hasResponse;
     }
 
 });

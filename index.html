@@ -19,6 +19,9 @@
             <button id="info-btn" title="Game Rules">
                 <img src="images/information-circle-outline.svg" alt="Info">
             </button>
+            <button id="difficulty-btn" title="AI Difficulty">
+                <img src="images/play-circle-outline.svg" alt="AI Difficulty">
+            </button>
             <button id="history-btn" title="Move History" disabled>
                 <img src="images/list-circle-outline.svg" alt="History">
             </button>
@@ -74,6 +77,14 @@
     <div id="win-overlay" class="overlay">
         <div class="overlay-content">
             <h2 id="win-message"></h2>
+        </div>
+    </div>
+
+    <!-- Add this right before the closing body tag -->
+    <div id="ai-spinner-overlay" class="overlay">
+        <div class="spinner-content">
+            <div class="spinner"></div>
+            <div class="spinner-text">AI is thinking...</div>
         </div>
     </div>
 

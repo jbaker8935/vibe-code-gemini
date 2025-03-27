@@ -224,6 +224,41 @@ body {
     text-align: center;
 }
 
+#ai-spinner-overlay {
+    align-items: center;
+    justify-content: center;
+    padding-top: 0;
+    color: white;
+}
+
+#ai-spinner-overlay .spinner-content {
+    background: rgba(0, 0, 0, 0.8);
+    padding: 20px;
+    border-radius: 10px;
+    text-align: center;
+    max-width: 200px;
+}
+
+.spinner {
+    width: 30px;
+    height: 30px;
+    border: 3px solid #f3f3f3;
+    border-top: 3px solid #3498db;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 12px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.spinner-text {
+    font-size: 0.9em;
+    color: #ffffff;
+}
+
 /* Score Display */
 #score-display {
     display: flex;
